@@ -34,6 +34,7 @@ static ngx_int_t ngx_http_upstream_dynamic_servers_init_process(ngx_cycle_t *cyc
 static void ngx_http_upstream_dynamic_servers_exit_process(ngx_cycle_t *cycle);
 static void ngx_http_upstream_dynamic_server_resolve(ngx_event_t *ev);
 static void ngx_http_upstream_dynamic_server_resolve_handler(ngx_resolver_ctx_t *ctx);
+static int ngx_addr_cmp_name(const void *ptr1, const void *ptr2);
 static ngx_resolver_node_t *ngx_resolver_lookup_name(ngx_resolver_t *r, ngx_str_t *name, uint32_t hash);
 
 static ngx_command_t ngx_http_upstream_dynamic_servers_commands[] = {
@@ -512,6 +513,11 @@ reinit_upstream:
         ngx_log_debug(NGX_LOG_DEBUG_CORE, ctx->resolver->log, 0, "upstream-dynamic-servers: '%V' was resolved to '%V'", &ctx->name, &addr->name);
     }
 
+    // Fix: 修复域名多ip情况下，不同worker进程，不同实例解析顺序不一致在upstream hash场景下问题
+    if (ctx->naddrs > 0) {
+        ngx_qsort(addrs, (size_t)ctx->naddrs, sizeof(ngx_addr_t), ngx_addr_cmp_name);
+    }
+    
     // If the domain failed to resolve, mark this server as down.
     dynamic_server->server->down = ctx->state ? 1 : 0;
     dynamic_server->server->addrs = addrs;
@@ -559,6 +565,12 @@ end:
     }
 
     ngx_add_timer(&dynamic_server->timer, 1000);
+}
+
+static int ngx_addr_cmp_name(const void *ptr1, const void *ptr2){
+    ngx_addr_t *tptr1 = (ngx_addr_t *)ptr1;
+    ngx_addr_t *tptr2 = (ngx_addr_t *)ptr2;
+    return (int) ngx_strcmp(tptr1->name.data, tptr2->name.data);
 }
 
 // Copied from src/core/ngx_resolver.c (nginx version 1.7.7).
